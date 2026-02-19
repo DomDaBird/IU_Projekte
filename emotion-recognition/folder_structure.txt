@@ -1,0 +1,100 @@
+emotion-recognition
+ ┣ assets
+ ┃ ┗ screenshots
+ ┣ data_split
+ ┃ ┣ test
+ ┃ ┃ ┣ angry
+ ┃ ┃ ┃ ┣  ...
+ ┃ ┃ ┣ fear
+ ┃ ┃ ┃ ┣  ...
+ ┃ ┃ ┣ happy
+ ┃ ┃ ┃ ┣  ...
+ ┃ ┃ ┣ sad
+ ┃ ┃ ┃ ┣  ...
+ ┃ ┃ ┗ surprise
+ ┃ ┃ ┃ ┗  ...
+ ┃ ┣ train
+ ┃ ┃ ┣ angry
+ ┃ ┃ ┃ ┣  ...
+ ┃ ┃ ┣ fear
+ ┃ ┃ ┃ ┣  ...
+ ┃ ┃ ┣ happy
+ ┃ ┃ ┃ ┣  ...
+ ┃ ┃ ┣ sad
+ ┃ ┃ ┃ ┣  ...
+ ┃ ┃ ┗ surprise
+ ┃ ┃ ┃ ┗  ...
+ ┃ ┗ val
+ ┃ ┃ ┣ angry
+ ┃ ┃ ┃ ┣  ...
+ ┃ ┃ ┣ fear
+ ┃ ┃ ┃ ┣  ...
+ ┃ ┃ ┣ happy
+ ┃ ┃ ┃ ┣  ...
+ ┃ ┃ ┣ sad
+ ┃ ┃ ┃ ┣  ...
+ ┃ ┃ ┗ surprise
+ ┃ ┃ ┃ ┗  ...
+ ┣ docs
+ ┃ ┣ TECHNICAL_OVERVIEW.md
+ ┃ ┗ USER_GUIDE.md
+ ┣ models
+ ┃ ┗ best_model.keras
+ ┣ reports
+ ┃ ┣ eval
+ ┃ ┃ ┣ classification_report.txt
+ ┃ ┃ ┣ confusion_matrix.csv
+ ┃ ┃ ┣ confusion_matrix.png
+ ┃ ┃ ┗ metrics.json
+ ┃ ┣ train
+ ┃ ┃ ┣ training_logs.json
+ ┃ ┃ ┣ training_logs_stage1.csv
+ ┃ ┃ ┗ training_logs_stage2.csv
+ ┃ ┣ classification_report.txt
+ ┃ ┣ confusion_matrix.csv
+ ┃ ┣ confusion_matrix.png
+ ┃ ┣ metrics.json
+ ┃ ┣ training_logs.json
+ ┃ ┣ training_logs_stage1.csv
+ ┃ ┗ training_logs_stage2.csv
+ ┣ tools
+ ┃ ┣ __pycache__
+ ┃ ┃ ┣ check_data.cpython-310.pyc
+ ┃ ┃ ┣ debug_overfit.cpython-310.pyc
+ ┃ ┃ ┣ peek_batch.cpython-310.pyc
+ ┃ ┃ ┗ resplit_from_train.cpython-310.pyc
+ ┃ ┣ check_data.py
+ ┃ ┣ debug_overfit.py
+ ┃ ┣ peek_batch.py
+ ┃ ┣ predict_image.py
+ ┃ ┣ predict_single.py
+ ┃ ┣ prepare_data.py
+ ┃ ┣ preprocess_faces.py
+ ┃ ┣ pretrain_raf.py
+ ┃ ┗ resplit_from_train.py
+ ┣ __pycache__
+ ┃ ┣ check_data.cpython-310.pyc
+ ┃ ┣ config.cpython-310.pyc
+ ┃ ┣ data.cpython-310.pyc
+ ┃ ┣ evaluate.cpython-310.pyc
+ ┃ ┣ infer_single.cpython-310.pyc
+ ┃ ┣ losses.cpython-310.pyc
+ ┃ ┣ mixup.cpython-310.pyc
+ ┃ ┣ model.cpython-310.pyc
+ ┃ ┣ preprocess_faces.cpython-310.pyc
+ ┃ ┣ save_class_names_once.cpython-310.pyc
+ ┃ ┗ train.cpython-310.pyc
+ ┣ .gitignore
+ ┣ app_streamlit.py
+ ┣ config.py
+ ┣ data.py
+ ┣ evaluate.py
+ ┣ infer_single.py
+ ┣ LICENCE.md
+ ┣ losses.py
+ ┣ mixup.py
+ ┣ model.py
+ ┣ README.md
+ ┣ requirements.txt
+ ┣ train.py
+ ┗ Tree.txt
