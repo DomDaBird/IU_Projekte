@@ -36,6 +36,8 @@ emotion-recognition
  ┃ ┃ ┗ surprise
  ┃ ┃ ┃ ┗  ...
  ┣ docs
+ ┃ ┣ folder_structure.txt
+ ┃ ┣ INSTALLATION.md
  ┃ ┣ TECHNICAL_OVERVIEW.md
  ┃ ┗ USER_GUIDE.md
  ┣ models
@@ -90,11 +92,10 @@ emotion-recognition
  ┣ data.py
  ┣ evaluate.py
  ┣ infer_single.py
- ┣ LICENCE.md
+ ┣ LICENCE
  ┣ losses.py
  ┣ mixup.py
  ┣ model.py
  ┣ README.md
  ┣ requirements.txt
- ┣ train.py
- ┗ Tree.txt
+ ┗ train.py
