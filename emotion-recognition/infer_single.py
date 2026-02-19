@@ -1,151 +1,137 @@
+"""
+CLI inference tool for the Emotion Recognition project.
+
+Usage (PowerShell):
+  python infer_single.py --image path\\to\\image.jpg
+  python infer_single.py --image path\\to\\image.jpg --topk 3
+  python infer_single.py --image path\\to\\image.jpg --save_json reports\\infer_result.json
+
+This script is intended as a developer tool (not required for the Streamlit demo).
+
+Company scenario note:
+A CLI is useful for automation/testing and helps future maintainers validate
+the model outside the UI.
+"""
+
 from __future__ import annotations
+
 import argparse
+import json
 from pathlib import Path
-from typing import Tuple, List, Union
+from typing import Dict, List, Tuple
 
 import numpy as np
-import tensorflow as tf
-from tensorflow.keras.utils import load_img, img_to_array
 from PIL import Image
+import tensorflow as tf
 
 import config as cfg
 
-"""
-This module is used to perform emotion recognition on a single image.
 
-The trained Keras model is loaded from disk and cached so that it can be reused
-across multiple CLI calls or by other modules (e.g. the Streamlit app).
-"""
+# ============================================================
+# Helpers
+# ============================================================
 
-# Path to the best-performing model that is saved during training
-MODEL_PATH = Path(cfg.MODELS_DIR) / cfg.BEST_MODEL_NAME
-
-# Global singleton cache for the loaded model instance
-_model: tf.keras.Model | None = None
+def load_model(model_path: Path) -> tf.keras.Model:
+    """Load a saved Keras model for inference."""
+    if not model_path.exists():
+        raise FileNotFoundError(f"Model not found: {model_path}")
+    return tf.keras.models.load_model(model_path, compile=False)
 
 
-def load_model_cached() -> tf.keras.Model:
-    """
-    The trained Keras model is loaded once from disk and stored in a global
-    singleton cache so that repeated calls can reuse the same model instance
-    without reloading it from disk.
-    """
-    global _model
-    if _model is None:
-        print(f"INFO | Lade Modell aus: {MODEL_PATH}")
-        _model = tf.keras.models.load_model(MODEL_PATH, compile=False)
-    return _model
-
-
-def _ensure_pil_image(source: Union[str, Path, Image.Image]) -> Image.Image:
-    """
-    A file path or existing PIL.Image object is converted to an RGB PIL.Image
-    instance so that all downstream processing receives a consistent image type.
-    """
-    if isinstance(source, (str, Path)):
-        img = load_img(source, color_mode="rgb")
-    elif isinstance(source, Image.Image):
-        img = source.convert("RGB")
-    else:
-        raise TypeError(f"Unsupported image source type: {type(source)}")
+def load_image(image_path: Path) -> Image.Image:
+    """Load an image from disk."""
+    if not image_path.exists():
+        raise FileNotFoundError(f"Image not found: {image_path}")
+    img = Image.open(image_path).convert("RGB")
     return img
 
 
-def preprocess_image(
-    source: Union[str, Path, Image.Image],
-    target_size: Tuple[int, int] | None = None
-) -> np.ndarray:
+def preprocess_pil(img: Image.Image) -> np.ndarray:
     """
-    The input image is loaded or normalized to a PIL RGB image, resized to the
-    configured model input size and converted to a NumPy batch tensor.
+    Convert PIL image to model input array.
 
-    Returned shape:
-        (1, H, W, 3) with dtype float32 and raw pixel values in [0, 255].
-
-    The actual normalization (e.g. EfficientNet/MobileNet preprocessing) is
-    expected to be handled inside the saved Keras model itself.
+    The model contains its own backbone-specific preprocessing layer,
+    so we only:
+    - resize
+    - convert to uint8 [0..255]
     """
-    if target_size is None:
-        target_size = cfg.PIL_SIZE
-
-    img = _ensure_pil_image(source)
-    img = img.resize(target_size)
-
-    arr = img_to_array(img)  # (H, W, 3), float32, 0–255
+    img = img.resize(cfg.PIL_SIZE)
+    arr = np.array(img, dtype=np.uint8)
     arr = np.expand_dims(arr, axis=0)  # (1, H, W, 3)
     return arr
 
 
-def predict_image(
-    source: Union[str, Path, Image.Image]
-) -> Tuple[str, float, np.ndarray, List[str]]:
-    """
-    A forward pass through the trained model is performed for a single input
-    image and the prediction results are returned.
-
-    Returns:
-        - predicted_label (str): the class name with the highest probability.
-        - confidence (float): the probability associated with the predicted class.
-        - probs (np.ndarray): full probability vector of shape (num_classes,).
-        - class_names (List[str]): list of class names in index order.
-    """
-    model = load_model_cached()
-    x = preprocess_image(source)
-    preds = model.predict(x, verbose=0)[0]  # (num_classes,)
-
-    class_names = cfg.ACTIVE_CLASSES
-    idx = int(np.argmax(preds))
-    label = class_names[idx] if idx < len(class_names) else str(idx)
-    confidence = float(preds[idx])
-
-    return label, confidence, preds, class_names
+def topk(probs: np.ndarray, class_names: List[str], k: int) -> List[Tuple[str, float]]:
+    """Return top-k (class, probability) pairs."""
+    k = max(1, min(k, len(class_names)))
+    idx = np.argsort(probs)[::-1][:k]
+    return [(class_names[i], float(probs[i])) for i in idx]
 
 
-def cli():
-    """
-    A simple command line interface is provided so that a single image can be
-    passed as an argument and its predicted emotion can be printed together
-    with the top-K class probabilities.
-    """
-    parser = argparse.ArgumentParser(
-        description="Emotion recognition for a single image using the FER model."
-    )
+def save_json(path: Path, payload: Dict) -> None:
+    """Write JSON output to disk."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
+# ============================================================
+# Main
+# ============================================================
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Single image inference (emotion recognition).")
+    parser.add_argument("--image", type=str, required=True, help="Path to image file.")
+    parser.add_argument("--topk", type=int, default=5, help="Show top-k predictions (default: 5).")
     parser.add_argument(
-        "image_path",
+        "--model",
         type=str,
-        help="Path to an image file (JPG/PNG) whose emotion should be predicted.",
+        default=str(cfg.MODELS_DIR / cfg.BEST_MODEL_NAME),
+        help="Path to .keras model file.",
     )
     parser.add_argument(
-        "--topk",
-        type=int,
-        default=5,
-        help="Number of top-K classes whose probabilities should be printed.",
+        "--save_json",
+        type=str,
+        default="",
+        help="Optional path to save predictions as JSON.",
     )
-
     args = parser.parse_args()
-    image_path = Path(args.image_path)
 
-    if not image_path.exists():
-        print(f"ERROR | Image not found: {image_path}")
-        return
+    cfg.ensure_project_dirs()
 
-    label, conf, probs, class_names = predict_image(image_path)
+    image_path = Path(args.image)
+    model_path = Path(args.model)
 
-    print(f"✅ Prediction: {label} (confidence={conf:.3f})")
-    print("Top-K probabilities:")
+    model = load_model(model_path)
+    img = load_image(image_path)
+    x = preprocess_pil(img)
 
-    # Classes are sorted in descending order of probability and the top-K
-    # entries are printed together with their class names.
-    idxs = np.argsort(probs)[::-1][: args.topk]
-    for i in idxs:
-        cname = class_names[i]
-        p = probs[i]
-        print(f"  - {cname:9s}: {p:.4f}")
+    probs = model.predict(x, verbose=0)[0]
+    pred_idx = int(np.argmax(probs))
+    pred_label = cfg.ACTIVE_CLASSES[pred_idx]
+    pred_conf = float(probs[pred_idx])
+
+    top = topk(probs, cfg.ACTIVE_CLASSES, args.topk)
+
+    print("\nINFERENCE RESULT")
+    print(f"Image: {image_path}")
+    print(f"Model: {model_path}")
+    print(f"Prediction: {pred_label} (confidence={pred_conf:.4f})")
+    print("\nTop-k:")
+    for name, p in top:
+        print(f" - {name:10s}: {p:.4f}")
+
+    if args.save_json:
+        payload = {
+            "image": str(image_path),
+            "model": str(model_path),
+            "prediction": pred_label,
+            "confidence": pred_conf,
+            "topk": [{"class": n, "prob": p} for n, p in top],
+            "classes": cfg.ACTIVE_CLASSES,
+        }
+        save_json(Path(args.save_json), payload)
+        print(f"\nSaved JSON: {args.save_json}")
 
 
 if __name__ == "__main__":
-    cli()
-
-# Example usage from the project root:
-# (fer) cd C:\Users\domvo\Desktop\emotion-recognition-fer2013
-# python infer_single.py path\to\your\image.png
+    main()

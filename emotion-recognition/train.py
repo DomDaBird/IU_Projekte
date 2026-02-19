@@ -1,425 +1,352 @@
-# train.py
+"""
+Training script for the Emotion Recognition project.
+
+Stages:
+1) Transfer Learning: backbone frozen
+2) Fine-Tuning: unfreeze last N backbone layers (BatchNorm stays frozen)
+
+Outputs:
+- models/best_model.keras
+- reports/train/training_logs.json
+- reports/train/training_history_stage1.csv
+- reports/train/training_history_stage2.csv
+
+Company scenario note:
+This script is designed to be runnable after a fresh checkout with clear logs,
+stable configuration, and reproducible behavior.
+"""
+
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Dict, List, Tuple
-import os
+import argparse
 import json
+from dataclasses import asdict
 from datetime import datetime
+from pathlib import Path
+from typing import Dict, Tuple
 
 import numpy as np
 import tensorflow as tf
-from tensorflow.keras import layers, models
 
 import config as cfg
-from data import make_datasets
-from mixup import apply_mixup
-
-AUTOTUNE = tf.data.AUTOTUNE
+import data as data_mod
+import model as model_mod
 
 
 # ============================================================
-#  Helper functions for class statistics and weighting
+# Losses
 # ============================================================
 
-def class_counts_from_dir(train_root: Path, class_names: List[str]) -> Dict[str, float]:
+def categorical_focal_loss(gamma: float = 2.0, eps: float = 1e-7):
     """
-    Is used to count how many image files exist per class in a data directory.
+    Focal loss for one-hot labels.
 
-    The function expects a structure like:
-        train_root/
-            angry/
-            fear/
-            happy/
-            ...
+    Args:
+        gamma: focusing parameter
+        eps: numerical stability
 
-    A separate subdirectory is expected for each class name.
+    Returns:
+        callable loss(y_true, y_pred)
     """
-    counts: Dict[str, float] = {}
-    for cname in class_names:
-        class_dir = Path(train_root) / cname
-        n = 0
-        if class_dir.exists():
-            for entry in os.scandir(class_dir):
-                if entry.is_file():
-                    n += 1
-        counts[cname] = float(n)
-    return counts
+    def _loss(y_true, y_pred):
+        y_true = tf.cast(y_true, tf.float32)
+        y_pred = tf.clip_by_value(tf.cast(y_pred, tf.float32), eps, 1.0 - eps)
 
+        # Cross-entropy
+        ce = -y_true * tf.math.log(y_pred)
+        # Focal weight
+        weight = tf.pow(1.0 - y_pred, gamma)
+        return tf.reduce_sum(weight * ce, axis=-1)
 
-def effective_alpha(counts: np.ndarray, beta: float = 0.9999) -> np.ndarray:
-    """
-    Is used to compute class-balanced weights according to:
-        "Class-Balanced Loss Based on Effective Number of Samples"
-        (Cui et al., 2019).
-
-    The returned vector can be used as alpha-weights for a focal loss.
-    """
-    effective_num = 1.0 - np.power(beta, counts)
-    weights = (1.0 - beta) / np.maximum(effective_num, 1e-8)
-    weights = weights / weights.sum() * len(counts)
-    return weights.astype(np.float32)
+    return _loss
 
 
 # ============================================================
-#  Model construction (backbone + classification head)
+# Dataset helpers (one-hot, mixup)
 # ============================================================
 
-def build_backbone(input_shape: Tuple[int, int, int]) -> Tuple[tf.keras.Model, tf.keras.Model]:
+def to_one_hot(ds: tf.data.Dataset, num_classes: int) -> tf.data.Dataset:
+    """Convert sparse integer labels to one-hot labels."""
+    def _map(x, y):
+        y = tf.one_hot(tf.cast(y, tf.int32), depth=num_classes)
+        return x, tf.cast(y, tf.float32)
+    return ds.map(_map, num_parallel_calls=tf.data.AUTOTUNE)
+
+
+def apply_mixup(ds: tf.data.Dataset, alpha: float, seed: int) -> tf.data.Dataset:
     """
-    Is used to construct the CNN backbone with ImageNet weights.
-
-    Depending on cfg.BACKBONE either MobileNetV2 or EfficientNetB0 is used.
-    The base network is wrapped into a small model named "backbone" that
-    already includes preprocessing, global average pooling and dropout.
+    Apply MixUp on already-batched (x, y_onehot) dataset.
     """
-    backbone_name = cfg.BACKBONE.lower()
+    if alpha <= 0:
+        raise ValueError("MixUp alpha must be > 0")
 
-    if backbone_name == "mobilenet_v2":
-        base = tf.keras.applications.MobileNetV2(
-            include_top=False,
-            input_shape=input_shape,
-            weights="imagenet",
-        )
-        preprocess = tf.keras.applications.mobilenet_v2.preprocess_input
-    else:
-        base = tf.keras.applications.EfficientNetB0(
-            include_top=False,
-            input_shape=input_shape,
-            weights="imagenet",
-        )
-        preprocess = tf.keras.applications.efficientnet.preprocess_input
+    rng = tf.random.Generator.from_seed(seed)
 
-    inp = layers.Input(shape=input_shape, name="image")
-    x = preprocess(inp)
-    x = base(x, training=False)
-    x = layers.GlobalAveragePooling2D(name="gap")(x)
-    x = layers.Dropout(cfg.DROP_RATE, name="backbone_dropout")(x)
+    def _mix(x, y):
+        # Sample lambda from Beta(alpha, alpha)
+        lam = rng.uniform([], 0.0, 1.0)
+        # Approx beta via two gammas if needed:
+        # But for simplicity, use uniform + power shaping:
+        # (not perfect Beta, but stable and ok for a student project)
+        lam = tf.pow(lam, 1.0 / alpha)
+        lam = tf.clip_by_value(lam, 0.0, 1.0)
 
-    backbone = models.Model(inp, x, name="backbone")
-    return backbone, base
+        # Shuffle within batch
+        idx = tf.random.shuffle(tf.range(tf.shape(x)[0]), seed=seed)
+        x2 = tf.gather(x, idx)
+        y2 = tf.gather(y, idx)
 
+        x_mix = lam * tf.cast(x, tf.float32) + (1.0 - lam) * tf.cast(x2, tf.float32)
+        y_mix = lam * y + (1.0 - lam) * y2
 
-def build_head(features: tf.Tensor, num_classes: int) -> tf.Tensor:
-    """
-    Is used to add the final classification layer on top of the backbone.
+        # Keep image dtype consistent (model preprocess casts anyway)
+        x_mix = tf.clip_by_value(x_mix, 0.0, 255.0)
+        return tf.cast(x_mix, tf.uint8), tf.cast(y_mix, tf.float32)
 
-    A dense layer with softmax activation is used, producing one probability
-    value per class.
-    """
-    return layers.Dense(num_classes, activation="softmax", name="cls_head")(features)
+    return ds.map(_mix, num_parallel_calls=tf.data.AUTOTUNE)
 
 
 # ============================================================
-#  Loss and optimizer helpers
+# Callbacks / logging
 # ============================================================
 
-def categorical_focal_loss(alpha_vec: np.ndarray, gamma: float):
-    """
-    Is used to construct a multi-class focal loss with class-dependent alpha.
+def make_callbacks(stage: str, out_dir: Path, checkpoint_path: Path) -> list[tf.keras.callbacks.Callback]:
+    """Create callbacks for a training stage."""
+    out_dir.mkdir(parents=True, exist_ok=True)
 
-    The provided alpha_vec is expected to contain one weight per class.
-    """
-    alpha = tf.constant(alpha_vec.astype("float32"), dtype=tf.float32)
+    csv_path = out_dir / f"training_history_{stage}.csv"
+    return [
+        tf.keras.callbacks.ModelCheckpoint(
+            filepath=str(checkpoint_path),
+            monitor="val_accuracy",
+            mode="max",
+            save_best_only=True,
+            save_weights_only=False,
+            verbose=1,
+        ),
+        tf.keras.callbacks.EarlyStopping(
+            monitor="val_accuracy",
+            mode="max",
+            patience=cfg.EARLYSTOP_STAGE2_PATIENCE if stage == "stage2" else cfg.EARLYSTOP_STAGE1_PATIENCE,
+            restore_best_weights=True,
+            verbose=1,
+        ),
+        tf.keras.callbacks.CSVLogger(str(csv_path), append=False),
+    ]
 
-    def loss(y_true: tf.Tensor, y_pred: tf.Tensor) -> tf.Tensor:
-        y_pred_clipped = tf.clip_by_value(y_pred, 1e-7, 1.0 - 1e-7)
-        ce = -tf.reduce_sum(y_true * tf.math.log(y_pred_clipped), axis=-1)
-        pt = tf.reduce_sum(y_true * y_pred_clipped, axis=-1)
-        alpha_w = tf.reduce_sum(y_true * alpha, axis=-1)
-        fl = alpha_w * tf.pow(1.0 - pt, gamma) * ce
-        return tf.reduce_mean(fl)
 
-    return loss
-
-
-def make_optimizer(total_steps: int, lr_base: float) -> tf.keras.optimizers.Optimizer:
-    """
-    Is used to build the optimizer together with an optional learning-rate schedule.
-
-    If cfg.LR_SCHEDULE is set to "cosine", a CosineDecay schedule is used.
-    Otherwise, a constant learning rate is applied.
-    """
-    if cfg.LR_SCHEDULE == "cosine" and total_steps > 0:
+def make_optimizer(lr: float, steps_per_epoch: int) -> tf.keras.optimizers.Optimizer:
+    """Create optimizer with either cosine or plateau scheduling."""
+    if cfg.LR_SCHEDULE == "cosine":
+        # Cosine schedule over total steps (simple, robust)
         schedule = tf.keras.optimizers.schedules.CosineDecay(
-            initial_learning_rate=lr_base,
-            decay_steps=total_steps,
-            alpha=0.1,
+            initial_learning_rate=lr,
+            decay_steps=max(steps_per_epoch * 10, 1),
+            alpha=0.05,
         )
         return tf.keras.optimizers.Adam(learning_rate=schedule)
 
-    return tf.keras.optimizers.Adam(learning_rate=lr_base)
+    # plateau: fixed lr, ReduceLROnPlateau callback added later
+    return tf.keras.optimizers.Adam(learning_rate=lr)
 
 
-def compute_class_weights(
-    train_root: Path,
-    class_names: List[str],
-) -> Tuple[Dict[int, float], np.ndarray]:
-    """
-    Is used to compute:
+def maybe_add_plateau_callback(callbacks: list[tf.keras.callbacks.Callback]) -> list[tf.keras.callbacks.Callback]:
+    """Add ReduceLROnPlateau if configured."""
+    if cfg.LR_SCHEDULE != "plateau":
+        return callbacks
 
-    * class_weight dict (for Keras fit, one weight per class index)
-    * alpha_vec for focal loss (class-balanced weighting)
-
-    Both are derived from the number of training samples per class.
-    """
-    counts_dict = class_counts_from_dir(train_root, class_names)
-    print(f"INFO | counts(train)= {counts_dict}")
-
-    counts_arr = np.array([counts_dict[c] for c in class_names], dtype=np.float32)
-    total = counts_arr.sum()
-    print("INFO | total_train_samples=", int(total))
-
-    inv = total / np.maximum(counts_arr, 1.0)
-    inv = inv / inv.mean()
-    class_w = {i: float(inv[i]) for i in range(len(class_names))}
-
-    alpha_vec = effective_alpha(counts_arr, beta=0.9999)
-    return class_w, alpha_vec
-
-
-# ============================================================
-#  Stage-wise training (head-only + fine-tuning)
-# ============================================================
-
-def _find_base_backbone(model: tf.keras.Model) -> tf.keras.Model:
-    """
-    Is used to robustly locate the actual CNN base model inside the full model.
-
-    The base model is expected to be a child model of the "backbone" model,
-    but common fallback names are also supported.
-    """
-    # Primary: "backbone" submodel
-    try:
-        backbone = model.get_layer("backbone")
-        for l in backbone.layers:
-            if isinstance(l, tf.keras.Model):
-                return l
-        for l in backbone.layers:
-            if hasattr(l, "layers"):
-                return l
-    except Exception:
-        pass
-
-    # Fallback: any nested model with layers
-    candidates = [l for l in model.layers if isinstance(l, tf.keras.Model)]
-    for m in candidates:
-        if m.name.lower() in {"efficientnetb0", "mobilenetv2", "mobilenet_v2"}:
-            return m
-
-    raise ValueError(
-        f"Backbone model not found. Available layers: {[l.name for l in model.layers]}"
+    callbacks.append(
+        tf.keras.callbacks.ReduceLROnPlateau(
+            monitor="val_loss",
+            factor=cfg.ROP_FACTOR,
+            patience=cfg.ROP_PATIENCE,
+            min_lr=cfg.ROP_MIN_LR,
+            min_delta=cfg.ROP_MIN_DELTA,
+            verbose=1,
+        )
     )
+    return callbacks
 
 
-def train_one_stage(
+# ============================================================
+# Training logic
+# ============================================================
+
+def compile_model(
+    model: tf.keras.Model,
+    lr: float,
+    steps_per_epoch: int,
+    use_onehot: bool,
+    label_smoothing: float,
+) -> None:
+    """Compile model with configured loss/metrics."""
+    opt = make_optimizer(lr, steps_per_epoch)
+
+    if use_onehot:
+        if cfg.USE_FOCAL:
+            loss = categorical_focal_loss(gamma=cfg.FOCAL_GAMMA)
+        else:
+            loss = tf.keras.losses.CategoricalCrossentropy(
+                from_logits=False,
+                label_smoothing=label_smoothing,
+            )
+        metrics = [tf.keras.metrics.CategoricalAccuracy(name="accuracy")]
+    else:
+        # Sparse labels (no label smoothing)
+        loss = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=False)
+        metrics = [tf.keras.metrics.SparseCategoricalAccuracy(name="accuracy")]
+
+    model.compile(optimizer=opt, loss=loss, metrics=metrics)
+
+
+def train_stage(
+    stage: str,
     model: tf.keras.Model,
     train_ds: tf.data.Dataset,
     val_ds: tf.data.Dataset,
     epochs: int,
-    lr_base: float,
-    class_weight: Dict[int, float],
-    alpha_vec: np.ndarray,
-    finetune_backbone: bool = False,
-    unfreeze_last: int = 0,
-    stage_name: str = "stage",
-) -> tf.keras.callbacks.History:
-    """
-    Is used to train the model for one stage.
+    lr: float,
+    out_dir: Path,
+    checkpoint_path: Path,
+    use_onehot: bool,
+    label_smoothing: float,
+) -> Dict:
+    """Train one stage and return history dict."""
+    # Determine steps per epoch for scheduling stability
+    steps_per_epoch = None
+    try:
+        steps_per_epoch = tf.data.experimental.cardinality(train_ds).numpy()
+        if steps_per_epoch <= 0:
+            steps_per_epoch = None
+    except Exception:
+        steps_per_epoch = None
 
-    In the first stage only the classification head is trained.
-    In the second stage the last layers of the backbone are unfrozen and
-    fine-tuned with a smaller learning rate.
-    """
-    if finetune_backbone and unfreeze_last > 0:
-        base_model = _find_base_backbone(model)
-        for layer in base_model.layers[-unfreeze_last:]:
-            layer.trainable = True
+    # Fallback if cardinality unknown
+    if steps_per_epoch is None:
+        steps_per_epoch = 200  # safe fallback; does not break training
 
-    train_batches = tf.data.experimental.cardinality(train_ds).numpy()
-    if train_batches < 0:
-        train_batches = int(np.ceil(73017 / cfg.BATCH_SIZE))
-    total_steps = int(train_batches * epochs)
-
-    optimizer = make_optimizer(total_steps, lr_base)
-
-    if cfg.USE_FOCAL:
-        loss_fn = categorical_focal_loss(alpha_vec=alpha_vec, gamma=cfg.FOCAL_GAMMA)
-        class_weight_arg = None
-    else:
-        loss_fn = tf.keras.losses.CategoricalCrossentropy(label_smoothing=0.0)
-        class_weight_arg = class_weight
-
-    model.compile(
-        optimizer=optimizer,
-        loss=loss_fn,
-        metrics=[
-            tf.keras.metrics.CategoricalAccuracy(name="accuracy"),
-            tf.keras.metrics.TopKCategoricalAccuracy(k=2, name="top2_acc"),
-        ],
+    compile_model(
+        model=model,
+        lr=lr,
+        steps_per_epoch=int(steps_per_epoch),
+        use_onehot=use_onehot,
+        label_smoothing=label_smoothing,
     )
 
-    checkpoint_cb = tf.keras.callbacks.ModelCheckpoint(
-        filepath=str(Path(cfg.MODELS_DIR) / cfg.BEST_MODEL_NAME),
-        monitor="val_accuracy",
-        save_best_only=True,
-        save_weights_only=False,
-    )
-
-    patience = cfg.EARLYSTOP_STAGE2_PATIENCE if finetune_backbone else cfg.EARLYSTOP_STAGE1_PATIENCE
-    earlystop_cb = tf.keras.callbacks.EarlyStopping(
-        monitor="val_accuracy",
-        patience=patience,
-        restore_best_weights=True,
-    )
-
-    callbacks = [checkpoint_cb, earlystop_cb]
-
-    if cfg.LR_SCHEDULE != "cosine":
-        callbacks.append(
-            tf.keras.callbacks.ReduceLROnPlateau(
-                monitor="val_loss",
-                factor=cfg.ROP_FACTOR,
-                patience=cfg.ROP_PATIENCE,
-                min_lr=cfg.ROP_MIN_LR,
-                min_delta=cfg.ROP_MIN_DELTA,
-            )
-        )
-
-    # CSV logger per stage (optional but handy)
-    csv_log_path = Path(cfg.REPORTS_DIR) / f"training_logs_{stage_name}.csv"
-    callbacks.append(tf.keras.callbacks.CSVLogger(str(csv_log_path), append=False))
+    callbacks = make_callbacks(stage=stage, out_dir=out_dir, checkpoint_path=checkpoint_path)
+    callbacks = maybe_add_plateau_callback(callbacks)
 
     history = model.fit(
         train_ds,
         validation_data=val_ds,
         epochs=epochs,
-        class_weight=class_weight_arg,
         callbacks=callbacks,
         verbose=1,
     )
-    return history
+    return history.history
 
-
-def _save_training_logs(
-    history_stage1: tf.keras.callbacks.History,
-    history_stage2: tf.keras.callbacks.History | None,
-    class_names: List[str],
-    class_w: Dict[int, float],
-    alpha_vec: np.ndarray,
-) -> None:
-    """
-    Is used to store training logs and key configuration into reports/training_logs.json.
-    """
-    reports_dir = Path(cfg.REPORTS_DIR)
-    reports_dir.mkdir(parents=True, exist_ok=True)
-
-    payload = {
-        "timestamp": datetime.now().isoformat(timespec="seconds"),
-        "class_names": class_names,
-        "class_weights": class_w,
-        "alpha_vec_focal": alpha_vec.tolist(),
-        "cfg_snapshot": {
-            "BACKBONE": cfg.BACKBONE,
-            "IMG_SIZE": cfg.IMG_SIZE,
-            "BATCH_SIZE": cfg.BATCH_SIZE,
-            "BALANCE_MODE": cfg.BALANCE_MODE,
-            "USE_FOCAL": cfg.USE_FOCAL,
-            "FOCAL_GAMMA": cfg.FOCAL_GAMMA,
-            "USE_MIXUP_STAGE1": cfg.USE_MIXUP_STAGE1,
-            "USE_MIXUP_STAGE2": cfg.USE_MIXUP_STAGE2,
-            "MIXUP_ALPHA": cfg.MIXUP_ALPHA,
-            "EPOCHS_STAGE1": cfg.EPOCHS_STAGE1,
-            "EPOCHS_STAGE2": cfg.EPOCHS_STAGE2,
-            "LR_STAGE1": cfg.LR_STAGE1,
-            "LR_STAGE2": cfg.LR_STAGE2,
-            "FINETUNE_LAST_LAYERS": cfg.FINETUNE_LAST_LAYERS,
-            "LR_SCHEDULE": cfg.LR_SCHEDULE,
-        },
-        "stage1_history": history_stage1.history,
-        "stage2_history": history_stage2.history if history_stage2 is not None else None,
-    }
-
-    (reports_dir / "training_logs.json").write_text(
-        json.dumps(payload, indent=2),
-        encoding="utf-8"
-    )
-
-
-# ============================================================
-#  Main entry point
-# ============================================================
 
 def main() -> None:
-    """
-    Is used as the main entry point for the training script.
+    parser = argparse.ArgumentParser(description="Train emotion recognition model.")
+    parser.add_argument("--mode", type=str, default=cfg.TRAIN_MODE, choices=list(cfg.PROFILES.keys()))
+    args = parser.parse_args()
 
-    The function performs the following high-level steps:
+    # Apply chosen mode at runtime (without editing config)
+    cfg.TRAIN_MODE = args.mode  # type: ignore[attr-defined]
 
-    1. Training/validation/test datasets are created.
-    2. Class statistics and weights are computed.
-    3. The backbone and classification head are built.
-    4. Stage 1: only the head is trained (backbone frozen).
-    5. Stage 2: the last backbone layers are fine-tuned.
-    6. Training histories are saved to reports/training_logs.json.
-    """
-    train_ds, val_ds, _, class_names = make_datasets(cfg.DATA_DIR)
-    num_classes = len(class_names)
-    print(f"INFO | class_names={class_names} | num_classes={num_classes}")
+    # Setup
+    cfg.ensure_project_dirs()
+    cfg.set_global_seed(cfg.SEED)
 
-    class_w_dict, alpha_vec = compute_class_weights(Path(cfg.DATA_DIR) / "train", class_names)
-    print(f"INFO | class_weights= {class_w_dict}")
-    print(f"INFO | alpha_vec(focal)= {alpha_vec}")
+    train_out = cfg.REPORTS_DIR / "train"
+    train_out.mkdir(parents=True, exist_ok=True)
 
-    train_stage1 = apply_mixup(train_ds, cfg.MIXUP_ALPHA) if cfg.USE_MIXUP_STAGE1 else train_ds
-    train_stage2 = apply_mixup(train_ds, cfg.MIXUP_ALPHA) if cfg.USE_MIXUP_STAGE2 else train_ds
+    # Log metadata for company scenario / reproducibility
+    metadata = {
+        "timestamp": datetime.now().isoformat(timespec="seconds"),
+        "train_mode": cfg.TRAIN_MODE,
+        "backbone": cfg.BACKBONE,
+        "img_size": cfg.IMG_SIZE,
+        "batch_size": cfg.BATCH_SIZE,
+        "classes": cfg.ACTIVE_CLASSES,
+        "profile": asdict(cfg.PROFILES[cfg.TRAIN_MODE]),
+        "mixup_stage1": cfg.USE_MIXUP_STAGE1,
+        "mixup_stage2": cfg.USE_MIXUP_STAGE2,
+        "mixup_alpha": cfg.MIXUP_ALPHA,
+        "use_focal": cfg.USE_FOCAL,
+        "focal_gamma": cfg.FOCAL_GAMMA,
+        "lr_schedule": cfg.LR_SCHEDULE,
+        "balance_mode": cfg.BALANCE_MODE,
+    }
+    (train_out / "run_config.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
 
-    input_shape = cfg.IMG_SIZE + (3,)
-    backbone, base_model = build_backbone(input_shape)
-    logits = build_head(backbone.output, num_classes)
-    model = tf.keras.Model(backbone.input, logits, name="fer_model")
+    # Build datasets
+    bundle = data_mod.build_datasets(class_names=cfg.ACTIVE_CLASSES, seed=cfg.SEED)
+    num_classes = len(bundle.class_names)
 
-    for layer in base_model.layers:
-        layer.trainable = False
+    # Create model
+    model = model_mod.build_model(num_classes=num_classes, img_size=cfg.IMG_SIZE)
 
-    Path(cfg.MODELS_DIR).mkdir(parents=True, exist_ok=True)
-    Path(cfg.REPORTS_DIR).mkdir(parents=True, exist_ok=True)
+    # Prepare for one-hot training if we use focal / mixup / label smoothing
+    use_onehot_stage1 = bool(cfg.USE_FOCAL or cfg.USE_MIXUP_STAGE1 or cfg.LABEL_SMOOTH_STAGE1 > 0)
+    use_onehot_stage2 = bool(cfg.USE_FOCAL or cfg.USE_MIXUP_STAGE2 or cfg.LABEL_SMOOTH_STAGE2 > 0)
 
-    print("INFO | Stage 1: training only the classification head (backbone frozen)")
-    hist1 = train_one_stage(
+    train_ds_s1 = bundle.train
+    val_ds_s1 = bundle.val
+
+    if use_onehot_stage1:
+        train_ds_s1 = to_one_hot(train_ds_s1, num_classes)
+        val_ds_s1 = to_one_hot(val_ds_s1, num_classes)
+        if cfg.USE_MIXUP_STAGE1:
+            train_ds_s1 = apply_mixup(train_ds_s1, alpha=cfg.MIXUP_ALPHA, seed=cfg.SEED + 10)
+
+    # Stage 1: backbone frozen
+    ckpt_path = cfg.MODELS_DIR / cfg.BEST_MODEL_NAME
+    hist1 = train_stage(
+        stage="stage1",
         model=model,
-        train_ds=train_stage1,
-        val_ds=val_ds,
+        train_ds=train_ds_s1,
+        val_ds=val_ds_s1,
         epochs=cfg.EPOCHS_STAGE1,
-        lr_base=cfg.LR_STAGE1,
-        class_weight=class_w_dict,
-        alpha_vec=alpha_vec,
-        finetune_backbone=False,
-        stage_name="stage1",
+        lr=cfg.LR_STAGE1,
+        out_dir=train_out,
+        checkpoint_path=ckpt_path,
+        use_onehot=use_onehot_stage1,
+        label_smoothing=cfg.LABEL_SMOOTH_STAGE1,
     )
 
-    print(f"INFO | Stage 2: fine-tuning, last {cfg.FINETUNE_LAST_LAYERS} layers unfrozen")
-    for layer in base_model.layers[:-cfg.FINETUNE_LAST_LAYERS]:
-        layer.trainable = False
-    for layer in base_model.layers[-cfg.FINETUNE_LAST_LAYERS:]:
-        layer.trainable = True
+    # Stage 2: fine-tune last layers
+    model_mod.set_finetune(model, finetune_last_layers=cfg.FINETUNE_LAST_LAYERS)
 
-    hist2 = train_one_stage(
+    train_ds_s2 = bundle.train
+    val_ds_s2 = bundle.val
+
+    if use_onehot_stage2:
+        train_ds_s2 = to_one_hot(train_ds_s2, num_classes)
+        val_ds_s2 = to_one_hot(val_ds_s2, num_classes)
+        if cfg.USE_MIXUP_STAGE2:
+            train_ds_s2 = apply_mixup(train_ds_s2, alpha=cfg.MIXUP_ALPHA, seed=cfg.SEED + 20)
+
+    hist2 = train_stage(
+        stage="stage2",
         model=model,
-        train_ds=train_stage2,
-        val_ds=val_ds,
+        train_ds=train_ds_s2,
+        val_ds=val_ds_s2,
         epochs=cfg.EPOCHS_STAGE2,
-        lr_base=cfg.LR_STAGE2,
-        class_weight=class_w_dict,
-        alpha_vec=alpha_vec,
-        finetune_backbone=True,
-        unfreeze_last=cfg.FINETUNE_LAST_LAYERS,
-        stage_name="stage2",
+        lr=cfg.LR_STAGE2,
+        out_dir=train_out,
+        checkpoint_path=ckpt_path,
+        use_onehot=use_onehot_stage2,
+        label_smoothing=cfg.LABEL_SMOOTH_STAGE2,
     )
 
-    _save_training_logs(hist1, hist2, class_names, class_w_dict, alpha_vec)
+    # Save combined logs
+    combined = {"stage1": hist1, "stage2": hist2}
+    (train_out / "training_logs.json").write_text(json.dumps(combined, indent=2), encoding="utf-8")
 
-    print(f"✅ Finished. Models & logs are stored in: {cfg.MODELS_DIR} / {cfg.REPORTS_DIR}")
+    print("\nDONE.")
+    print(f"Best model saved at: {ckpt_path}")
+    print(f"Training logs: {train_out / 'training_logs.json'}")
 
 
 if __name__ == "__main__":
