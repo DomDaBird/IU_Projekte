@@ -19,6 +19,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Tuple
 
+import matplotlib.pyplot as plt
 import numpy as np
 import tensorflow as tf
 from sklearn.metrics import (
@@ -29,15 +30,14 @@ from sklearn.metrics import (
     precision_score,
     recall_score,
 )
-import matplotlib.pyplot as plt
 
 import config as cfg
 import data as data_mod
 
-
 # ============================================================
 # Helpers
 # ============================================================
+
 
 def load_model(model_path: Path) -> tf.keras.Model:
     """Load a saved Keras model with custom layers."""
@@ -56,7 +56,9 @@ def ensure_eval_dir() -> Path:
     return out
 
 
-def get_predictions(model: tf.keras.Model, ds: tf.data.Dataset) -> Tuple[np.ndarray, np.ndarray]:
+def get_predictions(
+    model: tf.keras.Model, ds: tf.data.Dataset
+) -> Tuple[np.ndarray, np.ndarray]:
     """
     Collect y_true and y_pred for an integer-labeled dataset.
 
@@ -76,7 +78,9 @@ def get_predictions(model: tf.keras.Model, ds: tf.data.Dataset) -> Tuple[np.ndar
     return np.array(y_true, dtype=int), np.array(y_pred, dtype=int)
 
 
-def save_confusion_matrix_png(cm: np.ndarray, class_names: List[str], out_path: Path) -> None:
+def save_confusion_matrix_png(
+    cm: np.ndarray, class_names: List[str], out_path: Path
+) -> None:
     """Save confusion matrix figure."""
     fig = plt.figure(figsize=(7, 6))
     plt.imshow(cm, interpolation="nearest")
@@ -107,7 +111,9 @@ def save_confusion_matrix_png(cm: np.ndarray, class_names: List[str], out_path: 
     plt.close(fig)
 
 
-def save_confusion_matrix_csv(cm: np.ndarray, class_names: List[str], out_path: Path) -> None:
+def save_confusion_matrix_csv(
+    cm: np.ndarray, class_names: List[str], out_path: Path
+) -> None:
     """Save confusion matrix as CSV with labels."""
     header = ",".join(["true/pred"] + class_names)
     lines = [header]
@@ -123,6 +129,7 @@ def save_text(path: Path, text: str) -> None:
 # ============================================================
 # Main
 # ============================================================
+
 
 def main() -> None:
     cfg.ensure_project_dirs()
@@ -143,12 +150,22 @@ def main() -> None:
     # Metrics
     metrics: Dict[str, float] = {
         "accuracy": float(accuracy_score(y_true, y_pred)),
-        "precision_macro": float(precision_score(y_true, y_pred, average="macro", zero_division=0)),
-        "recall_macro": float(recall_score(y_true, y_pred, average="macro", zero_division=0)),
+        "precision_macro": float(
+            precision_score(y_true, y_pred, average="macro", zero_division=0)
+        ),
+        "recall_macro": float(
+            recall_score(y_true, y_pred, average="macro", zero_division=0)
+        ),
         "f1_macro": float(f1_score(y_true, y_pred, average="macro", zero_division=0)),
-        "precision_weighted": float(precision_score(y_true, y_pred, average="weighted", zero_division=0)),
-        "recall_weighted": float(recall_score(y_true, y_pred, average="weighted", zero_division=0)),
-        "f1_weighted": float(f1_score(y_true, y_pred, average="weighted", zero_division=0)),
+        "precision_weighted": float(
+            precision_score(y_true, y_pred, average="weighted", zero_division=0)
+        ),
+        "recall_weighted": float(
+            recall_score(y_true, y_pred, average="weighted", zero_division=0)
+        ),
+        "f1_weighted": float(
+            f1_score(y_true, y_pred, average="weighted", zero_division=0)
+        ),
     }
 
     # Confusion matrix

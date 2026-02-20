@@ -1,17 +1,21 @@
 from __future__ import annotations
+
+import shutil
 from pathlib import Path
 from typing import Tuple
-import shutil
+
 import numpy as np
 from PIL import Image
 
 # MTCNN is expensive to re-initialize – it is instantiated only once.
 try:
     from mtcnn.mtcnn import MTCNN
+
     _DETECTOR = MTCNN()
 except Exception as e:
     _DETECTOR = None
     print(f"WARN | MTCNN not available: {e} (fallback to center crop is used)")
+
 
 def _center_square_crop(img: Image.Image) -> Image.Image:
     """
@@ -25,6 +29,7 @@ def _center_square_crop(img: Image.Image) -> Image.Image:
     left = (w - s) // 2
     top = (h - s) // 2
     return img.crop((left, top, left + s, top + s))
+
 
 def detect_and_crop(img: Image.Image, margin: float = 0.2) -> Image.Image:
     """
@@ -61,6 +66,7 @@ def detect_and_crop(img: Image.Image, margin: float = 0.2) -> Image.Image:
     y1 = int(min(arr.shape[0], y + bh + margin * bh))
 
     return Image.fromarray(arr[y0:y1, x0:x1])
+
 
 def process_split(src_split: Path, dst_split: Path, img_size: Tuple[int, int]) -> None:
     """

@@ -1,17 +1,21 @@
 from __future__ import annotations
-import shutil, random
+
+import math
+import random
+import shutil
 from pathlib import Path
 from typing import Tuple
-import math
+
+from PIL import Image
+from preprocess_faces import process_split
 
 import config as cfg
-from preprocess_faces import process_split
-from PIL import Image
 
 # A fixed seed is used to obtain reproducible splits.
 random.seed(cfg.SEED)
 
 # ------- Helper functions -------
+
 
 def _norm(s: str) -> str:
     """
@@ -24,6 +28,7 @@ def _norm(s: str) -> str:
     The normalized string is returned.
     """
     return s.strip().lower().replace("-", "").replace("_", "").replace(" ", "")
+
 
 def _map_label(name: str) -> str | None:
     """
@@ -39,6 +44,7 @@ def _map_label(name: str) -> str | None:
         if n in alias_set or n == target:
             return target
     return None
+
 
 def _copy_tree_selected(src: Path, dst: Path, keep: set[str]) -> None:
     """
@@ -64,6 +70,7 @@ def _copy_tree_selected(src: Path, dst: Path, keep: set[str]) -> None:
             if f.suffix.lower() not in {".jpg", ".jpeg", ".png", ".bmp", ".webp"}:
                 continue
             shutil.copy2(f, out / f.name)
+
 
 def _split_folder_stratified(
     src_cls_dir: Path,
@@ -100,6 +107,7 @@ def _split_folder_stratified(
     for p in train:
         shutil.copy2(p, dst_train / p.name)
 
+
 def _ensure_clean_dir(path: Path) -> None:
     """
     A directory is recreated in a clean state.
@@ -113,7 +121,9 @@ def _ensure_clean_dir(path: Path) -> None:
         shutil.rmtree(path)
     path.mkdir(parents=True, exist_ok=True)
 
+
 # ------- Pipelines per source dataset -------
+
 
 def _prep_fer2013(raw_root: Path, temp_root: Path) -> None:
     """
@@ -135,6 +145,7 @@ def _prep_fer2013(raw_root: Path, temp_root: Path) -> None:
         dst = temp_root / "fer2013" / split
         _ensure_clean_dir(dst)
         _copy_tree_selected(src, dst, keep)
+
 
 def _prep_rafdb(raw_root: Path, temp_root: Path) -> None:
     """
@@ -158,6 +169,7 @@ def _prep_rafdb(raw_root: Path, temp_root: Path) -> None:
         dst = temp_root / "rafdb" / split
         _ensure_clean_dir(dst)
         _copy_tree_selected(src, dst, keep)
+
 
 def _prep_hfe(raw_root: Path, temp_root: Path) -> None:
     """
@@ -195,6 +207,7 @@ def _prep_hfe(raw_root: Path, temp_root: Path) -> None:
             val_frac=0.10,
             test_frac=0.10,
         )
+
 
 def _face_align_all(temp_root: Path, out_root: Path, size: Tuple[int, int]) -> None:
     """
@@ -255,8 +268,9 @@ def _face_align_all(temp_root: Path, out_root: Path, size: Tuple[int, int]) -> N
             continue
 
         merge_split(base / "train", out_root / "train")
-        merge_split(base / "val",   out_root / "val")
-        merge_split(base / "test",  out_root / "test")
+        merge_split(base / "val", out_root / "val")
+        merge_split(base / "test", out_root / "test")
+
 
 def main() -> None:
     """
@@ -300,6 +314,7 @@ def main() -> None:
     )
 
     print(f"✅ Done. Unified data is stored under: {cfg.PROCESSED_DIR}")
+
 
 if __name__ == "__main__":
     main()

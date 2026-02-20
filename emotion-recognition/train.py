@@ -32,10 +32,10 @@ import config as cfg
 import data as data_mod
 import model as model_mod
 
-
 # ============================================================
 # Losses
 # ============================================================
+
 
 def categorical_focal_loss(gamma: float = 2.0, eps: float = 1e-7):
     """
@@ -48,6 +48,7 @@ def categorical_focal_loss(gamma: float = 2.0, eps: float = 1e-7):
     Returns:
         callable loss(y_true, y_pred)
     """
+
     def _loss(y_true, y_pred):
         y_true = tf.cast(y_true, tf.float32)
         y_pred = tf.clip_by_value(tf.cast(y_pred, tf.float32), eps, 1.0 - eps)
@@ -65,11 +66,14 @@ def categorical_focal_loss(gamma: float = 2.0, eps: float = 1e-7):
 # Dataset helpers (one-hot, mixup)
 # ============================================================
 
+
 def to_one_hot(ds: tf.data.Dataset, num_classes: int) -> tf.data.Dataset:
     """Convert sparse integer labels to one-hot labels."""
+
     def _map(x, y):
         y = tf.one_hot(tf.cast(y, tf.int32), depth=num_classes)
         return x, tf.cast(y, tf.float32)
+
     return ds.map(_map, num_parallel_calls=tf.data.AUTOTUNE)
 
 
@@ -110,7 +114,10 @@ def apply_mixup(ds: tf.data.Dataset, alpha: float, seed: int) -> tf.data.Dataset
 # Callbacks / logging
 # ============================================================
 
-def make_callbacks(stage: str, out_dir: Path, checkpoint_path: Path) -> list[tf.keras.callbacks.Callback]:
+
+def make_callbacks(
+    stage: str, out_dir: Path, checkpoint_path: Path
+) -> list[tf.keras.callbacks.Callback]:
     """Create callbacks for a training stage."""
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -127,7 +134,11 @@ def make_callbacks(stage: str, out_dir: Path, checkpoint_path: Path) -> list[tf.
         tf.keras.callbacks.EarlyStopping(
             monitor="val_accuracy",
             mode="max",
-            patience=cfg.EARLYSTOP_STAGE2_PATIENCE if stage == "stage2" else cfg.EARLYSTOP_STAGE1_PATIENCE,
+            patience=(
+                cfg.EARLYSTOP_STAGE2_PATIENCE
+                if stage == "stage2"
+                else cfg.EARLYSTOP_STAGE1_PATIENCE
+            ),
             restore_best_weights=True,
             verbose=1,
         ),
@@ -150,7 +161,9 @@ def make_optimizer(lr: float, steps_per_epoch: int) -> tf.keras.optimizers.Optim
     return tf.keras.optimizers.Adam(learning_rate=lr)
 
 
-def maybe_add_plateau_callback(callbacks: list[tf.keras.callbacks.Callback]) -> list[tf.keras.callbacks.Callback]:
+def maybe_add_plateau_callback(
+    callbacks: list[tf.keras.callbacks.Callback],
+) -> list[tf.keras.callbacks.Callback]:
     """Add ReduceLROnPlateau if configured."""
     if cfg.LR_SCHEDULE != "plateau":
         return callbacks
@@ -171,6 +184,7 @@ def maybe_add_plateau_callback(callbacks: list[tf.keras.callbacks.Callback]) -> 
 # ============================================================
 # Training logic
 # ============================================================
+
 
 def compile_model(
     model: tf.keras.Model,
@@ -233,7 +247,9 @@ def train_stage(
         label_smoothing=label_smoothing,
     )
 
-    callbacks = make_callbacks(stage=stage, out_dir=out_dir, checkpoint_path=checkpoint_path)
+    callbacks = make_callbacks(
+        stage=stage, out_dir=out_dir, checkpoint_path=checkpoint_path
+    )
     callbacks = maybe_add_plateau_callback(callbacks)
 
     history = model.fit(
@@ -248,7 +264,9 @@ def train_stage(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Train emotion recognition model.")
-    parser.add_argument("--mode", type=str, default=cfg.TRAIN_MODE, choices=list(cfg.PROFILES.keys()))
+    parser.add_argument(
+        "--mode", type=str, default=cfg.TRAIN_MODE, choices=list(cfg.PROFILES.keys())
+    )
     args = parser.parse_args()
 
     # Apply chosen mode at runtime (without editing config)
@@ -278,7 +296,9 @@ def main() -> None:
         "lr_schedule": cfg.LR_SCHEDULE,
         "balance_mode": cfg.BALANCE_MODE,
     }
-    (train_out / "run_config.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+    (train_out / "run_config.json").write_text(
+        json.dumps(metadata, indent=2), encoding="utf-8"
+    )
 
     # Build datasets
     bundle = data_mod.build_datasets(class_names=cfg.ACTIVE_CLASSES, seed=cfg.SEED)
@@ -288,8 +308,12 @@ def main() -> None:
     model = model_mod.build_model(num_classes=num_classes, img_size=cfg.IMG_SIZE)
 
     # Prepare for one-hot training if we use focal / mixup / label smoothing
-    use_onehot_stage1 = bool(cfg.USE_FOCAL or cfg.USE_MIXUP_STAGE1 or cfg.LABEL_SMOOTH_STAGE1 > 0)
-    use_onehot_stage2 = bool(cfg.USE_FOCAL or cfg.USE_MIXUP_STAGE2 or cfg.LABEL_SMOOTH_STAGE2 > 0)
+    use_onehot_stage1 = bool(
+        cfg.USE_FOCAL or cfg.USE_MIXUP_STAGE1 or cfg.LABEL_SMOOTH_STAGE1 > 0
+    )
+    use_onehot_stage2 = bool(
+        cfg.USE_FOCAL or cfg.USE_MIXUP_STAGE2 or cfg.LABEL_SMOOTH_STAGE2 > 0
+    )
 
     train_ds_s1 = bundle.train
     val_ds_s1 = bundle.val
@@ -298,7 +322,9 @@ def main() -> None:
         train_ds_s1 = to_one_hot(train_ds_s1, num_classes)
         val_ds_s1 = to_one_hot(val_ds_s1, num_classes)
         if cfg.USE_MIXUP_STAGE1:
-            train_ds_s1 = apply_mixup(train_ds_s1, alpha=cfg.MIXUP_ALPHA, seed=cfg.SEED + 10)
+            train_ds_s1 = apply_mixup(
+                train_ds_s1, alpha=cfg.MIXUP_ALPHA, seed=cfg.SEED + 10
+            )
 
     # Stage 1: backbone frozen
     ckpt_path = cfg.MODELS_DIR / cfg.BEST_MODEL_NAME
@@ -325,7 +351,9 @@ def main() -> None:
         train_ds_s2 = to_one_hot(train_ds_s2, num_classes)
         val_ds_s2 = to_one_hot(val_ds_s2, num_classes)
         if cfg.USE_MIXUP_STAGE2:
-            train_ds_s2 = apply_mixup(train_ds_s2, alpha=cfg.MIXUP_ALPHA, seed=cfg.SEED + 20)
+            train_ds_s2 = apply_mixup(
+                train_ds_s2, alpha=cfg.MIXUP_ALPHA, seed=cfg.SEED + 20
+            )
 
     hist2 = train_stage(
         stage="stage2",
@@ -342,7 +370,9 @@ def main() -> None:
 
     # Save combined logs
     combined = {"stage1": hist1, "stage2": hist2}
-    (train_out / "training_logs.json").write_text(json.dumps(combined, indent=2), encoding="utf-8")
+    (train_out / "training_logs.json").write_text(
+        json.dumps(combined, indent=2), encoding="utf-8"
+    )
 
     print("\nDONE.")
     print(f"Best model saved at: {ckpt_path}")

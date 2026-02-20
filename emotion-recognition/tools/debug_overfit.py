@@ -21,10 +21,10 @@ import tensorflow as tf
 import config as cfg
 from train import build_backbone, build_head
 
-
 # =====================================================================
 # Load a RAW training dataset (no balancing, no shuffling)
 # =====================================================================
+
 
 def _load_raw_train_ds(train_root: Path):
     """
@@ -39,7 +39,7 @@ def _load_raw_train_ds(train_root: Path):
         label_mode="categorical",
         class_names=class_names,
         image_size=cfg.IMG_SIZE,
-        shuffle=False,         # absolutely no randomisation
+        shuffle=False,  # absolutely no randomisation
     )
 
     return ds, class_names
@@ -48,6 +48,7 @@ def _load_raw_train_ds(train_root: Path):
 # =====================================================================
 # Collect small subset into numpy
 # =====================================================================
+
 
 def _collect_small_subset(ds: tf.data.Dataset, max_samples: int = 400):
     xs, ys = [], []
@@ -71,6 +72,7 @@ def _collect_small_subset(ds: tf.data.Dataset, max_samples: int = 400):
 # Build minimal trainable model (full backbone unfrozen)
 # =====================================================================
 
+
 def _build_simple_model(num_classes: int) -> tf.keras.Model:
     input_shape = cfg.IMG_SIZE + (3,)
     backbone, base_model = build_backbone(input_shape)
@@ -89,6 +91,7 @@ def _build_simple_model(num_classes: int) -> tf.keras.Model:
 # =====================================================================
 # Main routine
 # =====================================================================
+
 
 def main():
     tf.random.set_seed(cfg.SEED)

@@ -27,7 +27,7 @@ from typing import Dict, List, Literal
 
 PROJECT_ROOT: Path = Path(__file__).resolve().parent
 
-DATA_DIR: Path = PROJECT_ROOT / "data_split"          # must contain train/val/test
+DATA_DIR: Path = PROJECT_ROOT / "data_split"  # must contain train/val/test
 MODELS_DIR: Path = PROJECT_ROOT / "models"
 REPORTS_DIR: Path = PROJECT_ROOT / "reports"
 CACHE_DIR: Path = PROJECT_ROOT / ".cache"
@@ -215,7 +215,9 @@ def validate_config() -> None:
     This helps future maintainers and prevents silent misconfiguration.
     """
     if BACKBONE not in ("mobilenet_v2", "efficientnet_b0"):
-        raise ValueError(f"Invalid BACKBONE='{BACKBONE}'. Use 'mobilenet_v2' or 'efficientnet_b0'.")
+        raise ValueError(
+            f"Invalid BACKBONE='{BACKBONE}'. Use 'mobilenet_v2' or 'efficientnet_b0'."
+        )
 
     if not isinstance(IMG_SIZE, tuple) or len(IMG_SIZE) != 2:
         raise ValueError("IMG_SIZE must be a tuple like (H, W).")
@@ -243,12 +245,14 @@ def set_global_seed(seed: int = SEED) -> None:
 
     try:
         import numpy as np
+
         np.random.seed(seed)
     except Exception:
         pass
 
     try:
         import tensorflow as tf
+
         tf.random.set_seed(seed)
     except Exception:
         pass

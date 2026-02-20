@@ -36,7 +36,7 @@ import config as cfg
 # ============================================================
 
 PROJECT_ROOT: Path = Path(__file__).resolve().parent
-RAF_DIR: Path = PROJECT_ROOT / "data_raf"   # Expected RAF-DB root
+RAF_DIR: Path = PROJECT_ROOT / "data_raf"  # Expected RAF-DB root
 RAF_TRAIN_DIR: Path = RAF_DIR / "train"
 RAF_VAL_DIR: Path = RAF_DIR / "val"
 
@@ -49,6 +49,7 @@ SEED = cfg.SEED
 # ============================================================
 # Helper: dataset creation for RAF-DB
 # ============================================================
+
 
 def _raf_image_ds_from_dir(
     root: Path,
@@ -100,6 +101,7 @@ def make_raf_datasets() -> Tuple[tf.data.Dataset, tf.data.Dataset, List[str]]:
 # Class weighting helpers (same logic as in train.py)
 # ============================================================
 
+
 def raf_class_counts(train_root: Path, class_names: List[str]) -> np.ndarray:
     """
     Per-class image counts are computed by scanning the subdirectories.
@@ -143,6 +145,7 @@ def compute_class_weights_raf(
 # ============================================================
 # Model construction (mirrors the main train.py logic)
 # ============================================================
+
 
 def build_backbone(input_shape) -> Tuple[tf.keras.Model, tf.keras.Model]:
     """
@@ -239,6 +242,7 @@ def make_optimizer(total_steps: int, lr_base: float) -> tf.keras.optimizers.Opti
 # Training loop (single-stage or two-stage on RAF)
 # ============================================================
 
+
 def train_on_raf(
     epochs_backbone_frozen: int = 4,
     epochs_finetune: int = 6,
@@ -316,9 +320,9 @@ def train_on_raf(
     )
 
     # Stage 2: fine-tuning is performed on the last FINETUNE_LAST_LAYERS layers.
-    for layer in base.layers[:-cfg.FINETUNE_LAST_LAYERS]:
+    for layer in base.layers[: -cfg.FINETUNE_LAST_LAYERS]:
         layer.trainable = False
-    for layer in base.layers[-cfg.FINETUNE_LAST_LAYERS:]:
+    for layer in base.layers[-cfg.FINETUNE_LAST_LAYERS :]:
         layer.trainable = True
 
     total_steps_stage2 = int(train_batches * epochs_finetune)

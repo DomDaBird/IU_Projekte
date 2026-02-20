@@ -21,15 +21,15 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 
 import numpy as np
-from PIL import Image
 import tensorflow as tf
+from PIL import Image
 
 import config as cfg
-
 
 # ============================================================
 # Helpers
 # ============================================================
+
 
 def load_model(model_path: Path) -> tf.keras.Model:
     """Load a saved Keras model for inference."""
@@ -78,10 +78,15 @@ def save_json(path: Path, payload: Dict) -> None:
 # Main
 # ============================================================
 
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Single image inference (emotion recognition).")
+    parser = argparse.ArgumentParser(
+        description="Single image inference (emotion recognition)."
+    )
     parser.add_argument("--image", type=str, required=True, help="Path to image file.")
-    parser.add_argument("--topk", type=int, default=5, help="Show top-k predictions (default: 5).")
+    parser.add_argument(
+        "--topk", type=int, default=5, help="Show top-k predictions (default: 5)."
+    )
     parser.add_argument(
         "--model",
         type=str,

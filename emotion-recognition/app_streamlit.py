@@ -20,12 +20,11 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
-from PIL import Image
 import streamlit as st
 import tensorflow as tf
+from PIL import Image
 
 import config as cfg
-
 
 # ============================================================
 # Constants / Paths
@@ -39,6 +38,7 @@ TEST_DIR = cfg.DATA_DIR / "test"
 # Data structures
 # ============================================================
 
+
 @dataclass(frozen=True)
 class QuizItem:
     image_path: Path
@@ -48,6 +48,7 @@ class QuizItem:
 # ============================================================
 # Caching: model + quiz index
 # ============================================================
+
 
 @st.cache_resource
 def load_model() -> tf.keras.Model:
@@ -64,7 +65,9 @@ def load_model() -> tf.keras.Model:
 
 
 @st.cache_data
-def build_quiz_items(limit_per_class: int = 300, seed: int = cfg.SEED) -> List[QuizItem]:
+def build_quiz_items(
+    limit_per_class: int = 300, seed: int = cfg.SEED
+) -> List[QuizItem]:
     """
     Build quiz item list from test dataset folder.
 
@@ -84,7 +87,12 @@ def build_quiz_items(limit_per_class: int = 300, seed: int = cfg.SEED) -> List[Q
             # quiz can still run with other classes; show warning later
             continue
 
-        paths = [p for p in class_dir.rglob("*") if p.is_file() and p.suffix.lower() in (".jpg", ".jpeg", ".png", ".bmp", ".webp")]
+        paths = [
+            p
+            for p in class_dir.rglob("*")
+            if p.is_file()
+            and p.suffix.lower() in (".jpg", ".jpeg", ".png", ".bmp", ".webp")
+        ]
         rng.shuffle(paths)
         for p in paths[:limit_per_class]:
             items.append(QuizItem(image_path=p, label=label))
@@ -97,6 +105,7 @@ def build_quiz_items(limit_per_class: int = 300, seed: int = cfg.SEED) -> List[Q
 # Inference helpers
 # ============================================================
 
+
 def preprocess_pil(img: Image.Image) -> np.ndarray:
     """
     Convert PIL image to model input array.
@@ -108,7 +117,9 @@ def preprocess_pil(img: Image.Image) -> np.ndarray:
     return np.expand_dims(arr, axis=0)
 
 
-def predict(model: tf.keras.Model, img_arr: np.ndarray) -> Tuple[str, float, np.ndarray]:
+def predict(
+    model: tf.keras.Model, img_arr: np.ndarray
+) -> Tuple[str, float, np.ndarray]:
     """Return (pred_label, confidence, probs)."""
     probs = model.predict(img_arr, verbose=0)[0]
     idx = int(np.argmax(probs))
@@ -117,24 +128,33 @@ def predict(model: tf.keras.Model, img_arr: np.ndarray) -> Tuple[str, float, np.
 
 def probs_table(probs: np.ndarray) -> List[Dict[str, object]]:
     """Return a table-friendly list for Streamlit."""
-    return [{"class": c, "probability": float(p)} for c, p in zip(cfg.ACTIVE_CLASSES, probs)]
+    return [
+        {"class": c, "probability": float(p)} for c, p in zip(cfg.ACTIVE_CLASSES, probs)
+    ]
 
 
 # ============================================================
 # UI sections
 # ============================================================
 
+
 def ui_header() -> None:
-    st.set_page_config(page_title="Emotion Recognition", page_icon="😊", layout="centered")
+    st.set_page_config(
+        page_title="Emotion Recognition", page_icon="😊", layout="centered"
+    )
     st.title("Emotion Recognition Demo")
     st.caption("AI Facial Emotion Recognition Application via Streamlit")
 
 
 def ui_sidebar() -> str:
     st.sidebar.header("Navigation")
-    mode = st.sidebar.radio("Mode", ["Single Prediction", "Quiz Mode", "About"], index=0)
+    mode = st.sidebar.radio(
+        "Mode", ["Single Prediction", "Quiz Mode", "About"], index=0
+    )
     st.sidebar.markdown("---")
-    st.sidebar.caption("Company scenario: built for a marketing demo and maintainable handover.")
+    st.sidebar.caption(
+        "Company scenario: built for a marketing demo and maintainable handover."
+    )
     return mode
 
 
@@ -154,7 +174,9 @@ def ui_about() -> None:
 
 def ui_single_prediction(model: tf.keras.Model) -> None:
     st.header("Single Image Prediction")
-    st.write("Upload a facial image (JPG/PNG). The model returns the predicted emotion and probabilities.")
+    st.write(
+        "Upload a facial image (JPG/PNG). The model returns the predicted emotion and probabilities."
+    )
 
     file = st.file_uploader("Upload image", type=["jpg", "jpeg", "png", "bmp", "webp"])
     if not file:
@@ -173,7 +195,9 @@ def ui_single_prediction(model: tf.keras.Model) -> None:
 
 def ui_quiz(model: tf.keras.Model) -> None:
     st.header("Emotion Quiz")
-    st.write("Try to guess the emotion shown. The correct label is revealed after you submit.")
+    st.write(
+        "Try to guess the emotion shown. The correct label is revealed after you submit."
+    )
 
     items = build_quiz_items()
 
@@ -228,12 +252,15 @@ def ui_quiz(model: tf.keras.Model) -> None:
             st.session_state.quiz_total = 0
 
     if st.session_state.quiz_total > 0:
-        st.metric("Quiz Score", f"{st.session_state.quiz_score}/{st.session_state.quiz_total}")
+        st.metric(
+            "Quiz Score", f"{st.session_state.quiz_score}/{st.session_state.quiz_total}"
+        )
 
 
 # ============================================================
 # Main
 # ============================================================
+
 
 def main() -> None:
     cfg.ensure_project_dirs()

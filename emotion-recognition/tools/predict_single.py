@@ -14,11 +14,10 @@ from pathlib import Path
 from typing import List, Tuple
 
 import numpy as np
-from PIL import Image
 import tensorflow as tf
+from PIL import Image
 
 import config as cfg
-
 
 # The location of the trained model is derived from the project configuration.
 BASE_DIR = Path(__file__).resolve().parent

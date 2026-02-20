@@ -29,7 +29,6 @@ import tensorflow as tf
 
 import config as cfg
 
-
 SplitName = Literal["train", "val", "test"]
 
 
@@ -37,9 +36,11 @@ SplitName = Literal["train", "val", "test"]
 # Data containers
 # ============================================================
 
+
 @dataclass(frozen=True)
 class DatasetBundle:
     """Bundle for train/val/test datasets plus class names."""
+
     train: tf.data.Dataset
     val: tf.data.Dataset
     test: tf.data.Dataset
@@ -49,6 +50,7 @@ class DatasetBundle:
 # ============================================================
 # Utilities
 # ============================================================
+
 
 def _split_dir(split: SplitName) -> Path:
     return cfg.DATA_DIR / split
@@ -87,7 +89,9 @@ def _list_images_for_class(split: SplitName, class_name: str) -> List[Path]:
     class_dir = _split_dir(split) / class_name
     # Common image extensions
     exts = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
-    paths = [p for p in class_dir.rglob("*") if p.is_file() and p.suffix.lower() in exts]
+    paths = [
+        p for p in class_dir.rglob("*") if p.is_file() and p.suffix.lower() in exts
+    ]
     return sorted(paths)
 
 
@@ -106,7 +110,9 @@ def _apply_fraction(paths: List[Path], fraction: float, seed: int) -> List[Path]
     return [paths[i] for i in idx]
 
 
-def describe_dataset(class_names: Optional[List[str]] = None) -> Dict[str, Dict[str, int]]:
+def describe_dataset(
+    class_names: Optional[List[str]] = None,
+) -> Dict[str, Dict[str, int]]:
     """
     Count files per split and per class.
 
@@ -129,6 +135,7 @@ def describe_dataset(class_names: Optional[List[str]] = None) -> Dict[str, Dict[
 # ============================================================
 # tf.data building blocks
 # ============================================================
+
 
 def _decode_image(path: tf.Tensor) -> tf.Tensor:
     """Read and decode an image file to uint8 RGB tensor."""
@@ -235,6 +242,7 @@ def _make_dataset_from_paths(
 # Public: dataset builders
 # ============================================================
 
+
 def build_datasets(
     class_names: Optional[List[str]] = None,
     seed: int = cfg.SEED,
@@ -256,18 +264,30 @@ def build_datasets(
     # --------------------------
     # Collect paths per split/class
     # --------------------------
-    train_per_class: Dict[str, List[Path]] = {c: _list_images_for_class("train", c) for c in class_names}
-    val_per_class: Dict[str, List[Path]] = {c: _list_images_for_class("val", c) for c in class_names}
-    test_per_class: Dict[str, List[Path]] = {c: _list_images_for_class("test", c) for c in class_names}
+    train_per_class: Dict[str, List[Path]] = {
+        c: _list_images_for_class("train", c) for c in class_names
+    }
+    val_per_class: Dict[str, List[Path]] = {
+        c: _list_images_for_class("val", c) for c in class_names
+    }
+    test_per_class: Dict[str, List[Path]] = {
+        c: _list_images_for_class("test", c) for c in class_names
+    }
 
     # --------------------------
     # Apply fractions (dev/debug)
     # --------------------------
     if cfg.TRAIN_FRACTION < 1.0:
-        train_per_class = {c: _apply_fraction(ps, cfg.TRAIN_FRACTION, seed + i) for i, (c, ps) in enumerate(train_per_class.items())}
+        train_per_class = {
+            c: _apply_fraction(ps, cfg.TRAIN_FRACTION, seed + i)
+            for i, (c, ps) in enumerate(train_per_class.items())
+        }
 
     if cfg.VAL_FRACTION < 1.0:
-        val_per_class = {c: _apply_fraction(ps, cfg.VAL_FRACTION, seed + 100 + i) for i, (c, ps) in enumerate(val_per_class.items())}
+        val_per_class = {
+            c: _apply_fraction(ps, cfg.VAL_FRACTION, seed + 100 + i)
+            for i, (c, ps) in enumerate(val_per_class.items())
+        }
 
     # --------------------------
     # Build datasets
@@ -276,18 +296,26 @@ def build_datasets(
         train_ds = _build_balanced_train(train_per_class, class_names, seed)
     else:
         train_paths, train_labels = _flatten(train_per_class, class_names)
-        train_ds = _make_dataset_from_paths(train_paths, train_labels, training=True, seed=seed)
+        train_ds = _make_dataset_from_paths(
+            train_paths, train_labels, training=True, seed=seed
+        )
 
     val_paths, val_labels = _flatten(val_per_class, class_names)
     test_paths, test_labels = _flatten(test_per_class, class_names)
 
     val_ds = _make_dataset_from_paths(val_paths, val_labels, training=False, seed=seed)
-    test_ds = _make_dataset_from_paths(test_paths, test_labels, training=False, seed=seed)
+    test_ds = _make_dataset_from_paths(
+        test_paths, test_labels, training=False, seed=seed
+    )
 
-    return DatasetBundle(train=train_ds, val=val_ds, test=test_ds, class_names=list(class_names))
+    return DatasetBundle(
+        train=train_ds, val=val_ds, test=test_ds, class_names=list(class_names)
+    )
 
 
-def _flatten(per_class: Dict[str, List[Path]], class_names: List[str]) -> Tuple[List[Path], List[int]]:
+def _flatten(
+    per_class: Dict[str, List[Path]], class_names: List[str]
+) -> Tuple[List[Path], List[int]]:
     """Flatten per-class dict into (paths, labels) using class_names order."""
     paths: List[Path] = []
     labels: List[int] = []
@@ -322,7 +350,11 @@ def _build_balanced_train(
         ds = tf.data.Dataset.from_tensor_slices(([str(p) for p in ps], labels))
 
         # Shuffle per class to avoid ordering artifacts
-        ds = ds.shuffle(buffer_size=min(len(ps), cfg.SHUFFLE_BUFFER_SIZE), seed=seed + idx, reshuffle_each_iteration=True)
+        ds = ds.shuffle(
+            buffer_size=min(len(ps), cfg.SHUFFLE_BUFFER_SIZE),
+            seed=seed + idx,
+            reshuffle_each_iteration=True,
+        )
 
         def _map_fn(p: tf.Tensor, y: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor]:
             img = _decode_image(p)

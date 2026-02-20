@@ -7,8 +7,8 @@ It is applied batch-wise and can be enabled independently for Stage 1 or Stage 2
 
 from __future__ import annotations
 
-import tensorflow as tf
 import numpy as np
+import tensorflow as tf
 
 
 def _mixup_batch(

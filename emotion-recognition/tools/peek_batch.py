@@ -1,8 +1,9 @@
-import tensorflow as tf
 import numpy as np
+import tensorflow as tf
 
 import config as cfg
 from data import make_datasets
+
 
 def check(ds: tf.data.Dataset, name: str, n_batches: int = 3) -> None:
     """
@@ -29,6 +30,7 @@ def check(ds: tf.data.Dataset, name: str, n_batches: int = 3) -> None:
         sums = np.sum(y.numpy(), axis=0)
         print(f"batch {i}: onehot_sum {sums}")
 
+
 def main() -> None:
     """
     All three dataset splits are loaded and a small number of batches is inspected.
@@ -42,8 +44,9 @@ def main() -> None:
     print("class_names:", class_names)
 
     check(train_ds, "TRAIN", n_batches=3)
-    check(val_ds,   "VAL",   n_batches=1)
-    check(test_ds,  "TEST",  n_batches=1)
+    check(val_ds, "VAL", n_batches=1)
+    check(test_ds, "TEST", n_batches=1)
+
 
 if __name__ == "__main__":
     main()

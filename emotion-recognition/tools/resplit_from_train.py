@@ -24,13 +24,11 @@ in-place. The split is stratified by class and reproducible.
 from __future__ import annotations
 
 import random
+import shutil
 from pathlib import Path
 from typing import Dict, List, Tuple
 
-import shutil
-
 import config as cfg
-
 
 # ============================================================
 #  Configuration
@@ -51,6 +49,7 @@ _EPS = 1e-6
 # ============================================================
 #  Helper functions
 # ============================================================
+
 
 def _assert_fractions() -> None:
     """
@@ -83,7 +82,9 @@ def _collect_class_files(train_dir: Path) -> Dict[str, List[Path]]:
     return class_files
 
 
-def _prepare_target_dirs(data_root: Path, class_names: List[str]) -> Tuple[Path, Path, Path]:
+def _prepare_target_dirs(
+    data_root: Path, class_names: List[str]
+) -> Tuple[Path, Path, Path]:
     """
     Creates val/ and test/ directories with empty class subfolders.
 
@@ -159,8 +160,8 @@ def _move_files(
     rng.shuffle(files)
 
     train_files = files[:n_train]
-    val_files = files[n_train:n_train + n_val]
-    test_files = files[n_train + n_val:]
+    val_files = files[n_train : n_train + n_val]
+    test_files = files[n_train + n_val :]
 
     assert len(train_files) == n_train
     assert len(val_files) == n_val
@@ -183,6 +184,7 @@ def _move_files(
 # ============================================================
 #  Main entry point
 # ============================================================
+
 
 def main() -> None:
     """

@@ -69,16 +69,19 @@ emotion-recognition
  ┃ ┣ preprocess_faces.py
  ┃ ┣ pretrain_raf.py
  ┃ ┗ resplit_from_train.py
+ ┣ .flake8
  ┣ .gitignore
  ┣ app_streamlit.py
  ┣ config.py
  ┣ data.py
  ┣ evaluate.py
  ┣ infer_single.py
- ┣ LICENCE
+ ┣ LICENSE
  ┣ losses.py
  ┣ mixup.py
  ┣ model.py
+ ┣ pyproject.toml
  ┣ README.md
+ ┣ requirements-dev.txt
  ┣ requirements.txt
  ┗ train.py

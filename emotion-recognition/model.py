@@ -22,10 +22,10 @@ import tensorflow as tf
 
 import config as cfg
 
-
 # ============================================================
 # Serializable preprocessing (no Lambda)
 # ============================================================
+
 
 @tf.keras.utils.register_keras_serializable(package="emotion_recognition")
 class BackbonePreprocess(tf.keras.layers.Layer):
@@ -65,6 +65,7 @@ class BackbonePreprocess(tf.keras.layers.Layer):
 # Head configuration
 # ============================================================
 
+
 @dataclass(frozen=True)
 class HeadConfig:
     hidden_units: int = 256
@@ -74,6 +75,7 @@ class HeadConfig:
 # ============================================================
 # Backbone builder
 # ============================================================
+
 
 def _build_backbone(
     img_size: Tuple[int, int],
@@ -114,6 +116,7 @@ def _build_backbone(
 # Public API
 # ============================================================
 
+
 def build_model(
     num_classes: int,
     img_size: Tuple[int, int],
@@ -153,7 +156,9 @@ def build_model(
 
     outputs = tf.keras.layers.Dense(num_classes, activation="softmax", name="probs")(x)
 
-    model = tf.keras.Model(inputs=inputs, outputs=outputs, name=f"{cfg.BACKBONE}_fer{num_classes}")
+    model = tf.keras.Model(
+        inputs=inputs, outputs=outputs, name=f"{cfg.BACKBONE}_fer{num_classes}"
+    )
     return model
 
 
@@ -174,7 +179,9 @@ def set_finetune(
     # Find backbone (the first nested model that looks like an applications model)
     backbone = None
     for layer in model.layers:
-        if isinstance(layer, tf.keras.Model) and layer.name.startswith(("efficientnet", "mobilenet")):
+        if isinstance(layer, tf.keras.Model) and layer.name.startswith(
+            ("efficientnet", "mobilenet")
+        ):
             backbone = layer
             break
 

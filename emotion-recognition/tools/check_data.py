@@ -1,14 +1,17 @@
 from __future__ import annotations
-from pathlib import Path
-from collections import Counter
-import tensorflow as tf
 
-from config import DATA_DIR, IMG_SIZE, BATCH_SIZE
+from collections import Counter
+from pathlib import Path
 from pathlib import Path as _P
 
+import tensorflow as tf
+
+from config import BATCH_SIZE, DATA_DIR, IMG_SIZE
+
 TRAIN_DIR = _P(DATA_DIR) / "train"
-VAL_DIR   = _P(DATA_DIR) / "val"
-TEST_DIR  = _P(DATA_DIR) / "test"
+VAL_DIR = _P(DATA_DIR) / "val"
+TEST_DIR = _P(DATA_DIR) / "test"
+
 
 def _count(ds: tf.data.Dataset) -> Counter:
     """
@@ -26,6 +29,7 @@ def _count(ds: tf.data.Dataset) -> Counter:
     for _, y in ds.unbatch().as_numpy_iterator():
         c[int(y.argmax())] += 1
     return c
+
 
 def main() -> None:
     """
@@ -75,6 +79,7 @@ def main() -> None:
     if val is not None:
         print("Val counts:", _count(val))
     print("Test counts:", _count(test))
+
 
 if __name__ == "__main__":
     main()
