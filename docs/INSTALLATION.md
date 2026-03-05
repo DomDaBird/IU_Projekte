@@ -1,118 +1,47 @@
-# Installation Guide – Emotion Recognition System
+# Installation Guide (Windows)
 
-## 1. System Requirements
+This project was developed as part of IU course **DLBDSEAIS02 --
+Artificial Intelligence** (Task 3). It provides a facial emotion
+recognition system using transfer learning with EfficientNetB0.
 
-- Windows 10/11
-- Python 3.10 (recommended)
-- PowerShell or compatible terminal
-- Internet connection (for dependency installation)
+## Requirements
 
----
+-   Windows 10/11
+-   Python 3.10+ (recommended)
+-   (Optional) NVIDIA GPU + CUDA (training can also run on CPU, but
+    slower)
 
-## 2. Obtain the Project
+## 1) Create and activate a virtual environment
 
-Option A – Clone from GitHub:
+Open PowerShell in the repository root:
 
-```powershell
-git clone https://github.com/DomDaBird/IU_Projekte.git
-cd IU_Projekte/emotion-recognition
-```
-
-Option B – Extract from ZIP:
-
-1. Download the ZIP archive.
-2. Extract it.
-3. Open PowerShell inside the `emotion-recognition` directory.
-
----
-
-## 3. Create Virtual Environment
-
-```powershell
+``` bash
 python -m venv .venv
-.\.venv\Scripts\activate
+.venv\Scripts\activate
+python -m pip install --upgrade pip
 ```
 
----
+## 2) Install dependencies
 
-## 4. Install Dependencies
-
-```powershell
+``` bash
 pip install -r requirements.txt
 ```
 
----
+## 3) Verify the installation
 
-## 5. Run the Application
+Run a quick import check:
 
-```powershell
-streamlit run app_streamlit.py
+``` bash
+python -c "import tensorflow as tf; print(tf.__version__)"
 ```
 
-Open in browser:
+If TensorFlow imports successfully, the environment is ready.
 
-http://localhost:8501
+## Troubleshooting
 
----
+If installation fails on TensorFlow:
 
-## 6. Optional: Train the Model
-
-```powershell
-python train.py
+``` bash
+python -m pip install --upgrade pip setuptools wheel
+pip install -r requirements.txt
 ```
-
-Model file will be saved to:
-
-models/best_model.keras
-
----
-
-## 7. Optional: Evaluate the Model
-
-```powershell
-python evaluate.py
-```
-
-Evaluation results will be stored in:
-
-reports/eval/
-
----
-
-## 8. Expected Folder Structure
-
-The system expects:
-
-data_split/
-  train/
-  val/
-  test/
-
-Each containing subfolders for:
-- angry
-- fear
-- happy
-- sad
-- surprise
-
----
-
-## 9. Troubleshooting
-
-### TensorFlow not found
-
-Ensure the virtual environment is activated before installing dependencies.
-
-### Model file missing
-
-Ensure `models/best_model.keras` exists in the models directory.
-
----
-
-## 10. Configuration Management
-
-All system parameters are defined in:
-
-config.py
-
-The repository is version-controlled and structured for maintainability and future extension.
