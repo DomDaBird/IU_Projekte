@@ -6,7 +6,7 @@ Modes:
 - Quiz Mode
 
 This UI is designed for a company scenario where a marketing department
-needs a simple, documented demo application.
+needs a simple and documented demo application.
 
 Run:
   streamlit run app_streamlit.py
@@ -17,7 +17,7 @@ from __future__ import annotations
 import random
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
 
 import numpy as np
 import streamlit as st
@@ -26,21 +26,29 @@ from PIL import Image
 
 import config as cfg
 
+
 # ============================================================
 # Constants / Paths
 # ============================================================
 
 MODEL_PATH = cfg.MODELS_DIR / cfg.BEST_MODEL_NAME
+
+# Quiz data sources:
+# - preferred: dataset/test (real evaluation set)
+# - fallback: demo_data (small sample shipped with the repo)
 TEST_DIR = cfg.DATA_DIR / "test"
+DEMO_DIR = cfg.PROJECT_ROOT / "demo_data"
+
+VALID_EXTS = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
 
 
 # ============================================================
 # Data structures
 # ============================================================
 
-
 @dataclass(frozen=True)
 class QuizItem:
+    """This dataclass stores a quiz image path and its ground-truth label."""
     image_path: Path
     label: str
 
@@ -49,51 +57,54 @@ class QuizItem:
 # Caching: model + quiz index
 # ============================================================
 
-
 @st.cache_resource
-def load_model() -> tf.keras.Model:
+def load_model_cached() -> tf.keras.Model:
     """
-    Load the trained model once per app session.
-    The model includes preprocessing in-graph (see model.py).
+    This function loads the trained model once per app session.
+
+    The model is expected to include preprocessing in-graph (see model.py).
     """
     if not MODEL_PATH.exists():
         raise FileNotFoundError(
-            f"Model not found at: {MODEL_PATH}\n"
-            "Expected a trained model at models/best_model.keras."
+            "Model file was not found.\n\n"
+            f"Expected path: {MODEL_PATH}\n\n"
+            "Next steps:\n"
+            "1) Train the model: python train.py\n"
+            f"2) Ensure the model is saved as: {cfg.BEST_MODEL_NAME} inside the 'models/' folder."
         )
     return tf.keras.models.load_model(MODEL_PATH, compile=False)
 
 
 @st.cache_data
-def build_quiz_items(
-    limit_per_class: int = 300, seed: int = cfg.SEED
-) -> List[QuizItem]:
+def build_quiz_items(source_dir: Path, limit_per_class: int, seed: int) -> List[QuizItem]:
     """
-    Build quiz item list from test dataset folder.
+    This function builds a shuffled list of quiz items from a folder structure.
 
-    Args:
-        limit_per_class: max images per class to include (avoids huge memory usage)
-        seed: deterministic shuffling seed
+    Parameters
+    ----------
+    source_dir : Path
+        Root directory containing emotion subfolders.
+    limit_per_class : int
+        Maximum images per class to index.
+    seed : int
+        Seed for deterministic shuffling.
 
-    Returns:
-        list of QuizItem
+    Returns
+    -------
+    List[QuizItem]
+        List of quiz items containing (image_path, label).
     """
     rng = random.Random(seed)
     items: List[QuizItem] = []
 
     for label in cfg.ACTIVE_CLASSES:
-        class_dir = TEST_DIR / label
+        class_dir = source_dir / label
         if not class_dir.exists():
-            # quiz can still run with other classes; show warning later
             continue
 
-        paths = [
-            p
-            for p in class_dir.rglob("*")
-            if p.is_file()
-            and p.suffix.lower() in (".jpg", ".jpeg", ".png", ".bmp", ".webp")
-        ]
+        paths = [p for p in class_dir.rglob("*") if p.is_file() and p.suffix.lower() in VALID_EXTS]
         rng.shuffle(paths)
+
         for p in paths[:limit_per_class]:
             items.append(QuizItem(image_path=p, label=label))
 
@@ -105,60 +116,67 @@ def build_quiz_items(
 # Inference helpers
 # ============================================================
 
-
 def preprocess_pil(img: Image.Image) -> np.ndarray:
     """
-    Convert PIL image to model input array.
+    This function converts a PIL image to a model input array.
 
-    The model contains preprocessing, so we only resize and return uint8.
+    The model contains its own preprocessing layer, so this function only:
+    - converts to RGB
+    - resizes to cfg.PIL_SIZE
+    - returns uint8 array in [0..255]
     """
     img = img.convert("RGB").resize(cfg.PIL_SIZE)
     arr = np.array(img, dtype=np.uint8)
     return np.expand_dims(arr, axis=0)
 
 
-def predict(
-    model: tf.keras.Model, img_arr: np.ndarray
-) -> Tuple[str, float, np.ndarray]:
-    """Return (pred_label, confidence, probs)."""
+def validate_model_output(probs: np.ndarray) -> None:
+    """This function validates that model output matches the configured class count."""
+    if probs.ndim != 1:
+        raise ValueError(f"Expected model output shape (C,), got {probs.shape}")
+    if probs.shape[0] != len(cfg.ACTIVE_CLASSES):
+        raise ValueError(
+            "Model output size does not match cfg.ACTIVE_CLASSES.\n"
+            f"Output size: {probs.shape[0]}\n"
+            f"Expected: {len(cfg.ACTIVE_CLASSES)}"
+        )
+
+
+def predict(model: tf.keras.Model, img_arr: np.ndarray) -> Tuple[str, float, np.ndarray]:
+    """This function returns (pred_label, confidence, probs)."""
     probs = model.predict(img_arr, verbose=0)[0]
+    validate_model_output(probs)
     idx = int(np.argmax(probs))
     return cfg.ACTIVE_CLASSES[idx], float(probs[idx]), probs
 
 
 def probs_table(probs: np.ndarray) -> List[Dict[str, object]]:
-    """Return a table-friendly list for Streamlit."""
-    return [
-        {"class": c, "probability": float(p)} for c, p in zip(cfg.ACTIVE_CLASSES, probs)
-    ]
+    """This function returns a table-friendly list for Streamlit."""
+    return [{"class": c, "probability": float(p)} for c, p in zip(cfg.ACTIVE_CLASSES, probs)]
 
 
 # ============================================================
 # UI sections
 # ============================================================
 
-
 def ui_header() -> None:
-    st.set_page_config(
-        page_title="Emotion Recognition", page_icon="😊", layout="centered"
-    )
+    """This function renders the page header and basic configuration."""
+    st.set_page_config(page_title="Emotion Recognition", page_icon="😊", layout="centered")
     st.title("Emotion Recognition Demo")
     st.caption("AI Facial Emotion Recognition Application via Streamlit")
 
 
 def ui_sidebar() -> str:
+    """This function renders the sidebar navigation and returns the selected mode."""
     st.sidebar.header("Navigation")
-    mode = st.sidebar.radio(
-        "Mode", ["Single Prediction", "Quiz Mode", "About"], index=0
-    )
+    mode = st.sidebar.radio("Mode", ["Single Prediction", "Quiz Mode", "About"], index=0)
     st.sidebar.markdown("---")
-    st.sidebar.caption(
-        "Company scenario: built for a marketing demo and maintainable handover."
-    )
+    st.sidebar.caption("Company scenario: built for a marketing demo and maintainable handover.")
     return mode
 
 
 def ui_about() -> None:
+    """This function renders the About page."""
     st.header("About")
     st.write(
         "This application predicts facial emotions from images using a trained deep learning model "
@@ -166,19 +184,26 @@ def ui_about() -> None:
     )
     st.subheader("How to run")
     st.code("streamlit run app_streamlit.py", language="bash")
+
     st.subheader("Model file")
     st.code(str(MODEL_PATH))
+
     st.subheader("Classes")
     st.write(", ".join(cfg.ACTIVE_CLASSES))
 
-
-def ui_single_prediction(model: tf.keras.Model) -> None:
-    st.header("Single Image Prediction")
+    st.subheader("Data sources for quiz")
     st.write(
-        "Upload a facial image (JPG/PNG). The model returns the predicted emotion and probabilities."
+        "- Preferred: `dataset/test/<class>/...` (evaluation test set)\n"
+        "- Fallback: `demo_data/<class>/...` (small demo set shipped with the repo)"
     )
 
-    file = st.file_uploader("Upload image", type=["jpg", "jpeg", "png", "bmp", "webp"])
+
+def ui_single_prediction(model: tf.keras.Model) -> None:
+    """This function renders the single image prediction page."""
+    st.header("Single Image Prediction")
+    st.write("Upload a facial image (JPG/PNG). The model returns the predicted emotion and probabilities.")
+
+    file = st.file_uploader("Upload image", type=[e.replace(".", "") for e in VALID_EXTS])
     if not file:
         st.info("Upload an image to start.")
         return
@@ -193,19 +218,42 @@ def ui_single_prediction(model: tf.keras.Model) -> None:
     st.dataframe(probs_table(probs), hide_index=True)
 
 
-def ui_quiz(model: tf.keras.Model) -> None:
-    st.header("Emotion Quiz")
-    st.write(
-        "Try to guess the emotion shown. The correct label is revealed after you submit."
-    )
+def _select_quiz_source() -> Tuple[Path, str]:
+    """This function selects the quiz image source folder and returns (path, label)."""
+    if TEST_DIR.exists():
+        return TEST_DIR, "dataset/test"
+    if DEMO_DIR.exists():
+        return DEMO_DIR, "demo_data"
+    return Path(), "none"
 
-    items = build_quiz_items()
+
+def ui_quiz(model: tf.keras.Model) -> None:
+    """This function renders the quiz mode page."""
+    st.header("Emotion Quiz")
+    st.write("Try to guess the emotion shown. The correct label is revealed after you submit.")
+
+    quiz_source, source_name = _select_quiz_source()
+    if source_name == "none":
+        st.error(
+            "No quiz images found.\n\n"
+            "Expected one of the following folders:\n"
+            "- dataset/test/<class>/...\n"
+            "- demo_data/<class>/...\n\n"
+            "Folder names must match cfg.ACTIVE_CLASSES."
+        )
+        return
+
+    if source_name == "dataset/test":
+        st.caption("Quiz source: dataset/test (evaluation test set)")
+        items = build_quiz_items(quiz_source, limit_per_class=300, seed=cfg.SEED)
+    else:
+        st.caption("Quiz source: demo_data (quick demo set)")
+        items = build_quiz_items(quiz_source, limit_per_class=50, seed=cfg.SEED)
 
     if not items:
         st.error(
-            "No quiz images found.\n\n"
-            "Expected test dataset at: data_split/test/<class>/... \n"
-            "Make sure the repository contains the test images and folder names match config.ACTIVE_CLASSES."
+            f"No quiz images were indexed from: {quiz_source}\n\n"
+            "Make sure each class folder contains image files (jpg/png/webp/...)."
         )
         return
 
@@ -220,7 +268,6 @@ def ui_quiz(model: tf.keras.Model) -> None:
     idx = int(st.session_state.quiz_idx) % len(items)
     item = items[idx]
 
-    # Load image from path (lazy)
     img = Image.open(item.image_path).convert("RGB")
     st.image(img, use_container_width=True)
 
@@ -236,7 +283,7 @@ def ui_quiz(model: tf.keras.Model) -> None:
             else:
                 st.info(f"Correct label: **{item.label}**")
 
-            # Optional: show model prediction (nice for demo)
+            # Show model prediction (nice for a demo)
             x = preprocess_pil(img)
             pred_label, pred_conf, _ = predict(model, x)
             st.caption(f"Model prediction: {pred_label} (confidence {pred_conf:.3f})")
@@ -252,24 +299,21 @@ def ui_quiz(model: tf.keras.Model) -> None:
             st.session_state.quiz_total = 0
 
     if st.session_state.quiz_total > 0:
-        st.metric(
-            "Quiz Score", f"{st.session_state.quiz_score}/{st.session_state.quiz_total}"
-        )
+        st.metric("Quiz Score", f"{st.session_state.quiz_score}/{st.session_state.quiz_total}")
 
 
 # ============================================================
 # Main
 # ============================================================
 
-
 def main() -> None:
+    """This function runs the Streamlit application."""
     cfg.ensure_project_dirs()
     ui_header()
     mode = ui_sidebar()
 
-    # Load model once; show user-friendly error if missing
     try:
-        model = load_model()
+        model = load_model_cached()
     except Exception as e:
         st.error("Model could not be loaded.")
         st.code(str(e))
