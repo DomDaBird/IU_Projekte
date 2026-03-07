@@ -209,7 +209,7 @@ def ui_about() -> None:
     st.code("streamlit run app_streamlit.py", language="bash")
 
     st.subheader("Model file")
-    st.code(str(MODEL_PATH))
+    st.code(str("...best_model.keras"))
 
     st.subheader("Classes")
     st.write(", ".join(cfg.ACTIVE_CLASSES))
@@ -239,7 +239,8 @@ def ui_single_prediction(model: tf.keras.Model) -> None:
         return
 
     img = Image.open(file)
-    st.image(img, use_container_width=True)
+    st.markdown("### Test Image")
+    display_image(img)
 
     x = preprocess_pil(img)
     label, conf, probs = predict(model, x)
@@ -256,6 +257,15 @@ def _select_quiz_source() -> Tuple[Path, str]:
         return DEMO_DIR, "demo_data"
     return Path(), "none"
 
+
+def display_image(img: Image.Image) -> None:
+    """
+    This function displays an image with a controlled size
+    to avoid oversized or pixelated images in the UI.
+    """
+    img = img.copy()
+    img.thumbnail((620, 620))
+    st.image(img)
 
 def ui_quiz(model: tf.keras.Model) -> None:
     """This function renders the quiz mode page."""
@@ -299,7 +309,8 @@ def ui_quiz(model: tf.keras.Model) -> None:
     item = items[idx]
 
     img = Image.open(item.image_path).convert("RGB")
-    st.image(img, use_container_width=True)
+    st.markdown("### Test Image")
+    display_image(img)
 
     guess = st.radio("Your guess:", cfg.ACTIVE_CLASSES, horizontal=True)
 
